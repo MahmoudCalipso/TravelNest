@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: travelnest-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-travelnest}
+      POSTGRES_USER: ${DB_USER:-travelnest_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-SecurePassword123!}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+    networks:
+      - travelnest-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-travelnest_user} -d ${DB_NAME:-travelnest}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # TravelNest API
+  api:
+    container_name: travelnest-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:5000
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${DB_NAME:-travelnest};Username=${DB_USER:-travelnest_user};Password=${DB_PASSWORD:-SecurePassword123!};"
+      Jwt__Secret: ${JWT_SECRET:-YourSuperSecretKeyThatIsAtLeast32CharactersLong1234567890}
+      Jwt__Issuer: ${JWT_ISSUER:-https://travelnest.com}
+      Jwt__Audience: ${JWT_AUDIENCE:-TravelNestAPI}
+      Jwt__ExpirationMinutes: ${JWT_EXPIRATION:-60}
+    ports:
+      - "${API_PORT:-5000}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - travelnest-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # PgAdmin for database management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: travelnest-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@travelnest.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-Admin123!}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      - postgres
+    networks:
+      - travelnest-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  travelnest-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
